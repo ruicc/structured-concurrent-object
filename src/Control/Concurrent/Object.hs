@@ -1,6 +1,7 @@
 module Control.Concurrent.Object
     ( Class(..), Object, Self(..), CallbackModule(..)
-    , new, (!), (!?), kill
+    , new
+    , ObjectLike(..)
     ) where
 
 import Prelude hiding (init, mod)
@@ -24,12 +25,14 @@ import Control.Concurrent.STM
 --      有限状態マシン gen_fsm
 --          DONE(?)
 --      メッセージハンドラのadd/remove (gen_event)
---          Classで。
+--          とりあえずClassで。
 --      メッセージハンドラの動的差し替え
 --          ロジックのレコード化
 --      状態のタイムアウト (openは30000msecのみ)
---          非同期イベント用フォークする？ This参照的なことはどうする？
---              Objectをactionに渡した
+--          非同期イベント用フォークする？
+--              しない、内部イベントは外部イベントとは別途処理
+--          This参照的なことはどうする？
+--              Selfをactionに渡した
 
 data Class msg reply state
     = Class
@@ -72,7 +75,6 @@ new Class{..} = do
             loop self = do
                 (msg, mmv)
                     <- atomically $ readTChan ch
-                -- TODO: fork & dispatch??
                 (reply, self')
                     <- runCallbackModule self msg
                 case mmv of

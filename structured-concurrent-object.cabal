@@ -3,7 +3,7 @@
 
 name:                structured-concurrent-object
 version:             0.1.0.0
--- synopsis:            
+synopsis:            So-called "object" as a frontend of thread.
 -- description:         
 license:             MIT
 license-file:        LICENSE
@@ -53,5 +53,6 @@ test-suite group
   hs-source-dirs:      tests, src
   build-depends:       base             >=4.7  && <4.8
                      , stm
+                     , containers
   ghc-options:         -Wall
   default-language:    Haskell2010
