@@ -29,16 +29,18 @@ data GReply
 newtype Group = Group { unGroup :: Object GMessage GReply }
 
 instance ObjectLike IO Group where
-    type Message Group = GMessage
-    type Reply Group = GReply
+    type OMessage Group = GMessage
+    type OReply Group = GReply
+    type OClass Group = Class IO GMessage GReply
 
+    new cl = Group <$> new cl
     (Group obj) ! msg = obj ! msg
     (Group obj) !? msg = obj !? msg
     kill (Group obj) = kill obj
 
 
 newGroup :: GroupId -> IO Group
-newGroup gid = Group <$> new Class
+newGroup gid = new Class
     { classInitializer = return Map.empty
     , classFinalizer = (\_st -> putStrLn "Cleanup")
     , classCallbackModule = CallbackModule $ \self@Self{..} msg -> case msg of

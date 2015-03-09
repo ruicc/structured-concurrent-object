@@ -1,12 +1,9 @@
 module Control.Concurrent.Object
     ( Class(..), Object, Self(..), CallbackModule(..)
-    , new
     , ObjectLike(..)
     ) where
 
 import Prelude hiding (init, mod)
---import Control.Concurrent.Structured
---import Control.Monad
 import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -89,26 +86,26 @@ newObject Class{..} = do
 
 
 class ObjectLike m obj where
-    type Message obj :: *
-    type Reply obj :: *
-    type Klass obj :: * -> *
+    type OMessage obj :: *
+    type OReply obj :: *
+    type OClass obj :: * -> *
 
     -- | Make Object.
-    new :: Klass obj state -> m obj
+    new :: OClass obj state -> m obj
 
     -- | Kill Object.
     kill :: obj -> m ()
 
     -- Asynchronous sending
-    (!) :: obj -> Message obj -> m ()
+    (!) :: obj -> OMessage obj -> m ()
 
     -- Synchronous sending
-    (!?) :: obj -> Message obj -> m (m (Reply obj))
+    (!?) :: obj -> OMessage obj -> m (m (OReply obj))
 
 instance ObjectLike IO (Object msg reply) where
-    type Message (Object msg reply) = msg
-    type Reply (Object msg reply) = reply
-    type Klass (Object msg reply) = Class IO msg reply
+    type OMessage (Object msg reply) = msg
+    type OReply (Object msg reply) = reply
+    type OClass (Object msg reply) = Class IO msg reply
 
     new = newObject
 
@@ -123,11 +120,12 @@ instance ObjectLike IO (Object msg reply) where
     kill obj = killThread $ objThreadId obj
 
 instance ObjectLike IO (Self IO msg reply state) where
-    type Message (Self IO msg reply state) = msg
-    type Reply (Self IO msg reply state) = reply
+    type OMessage (Self IO msg reply state) = msg
+    type OReply (Self IO msg reply state) = reply
+    type OClass (Self IO msg reply state) = Class IO msg reply
 
     -- | Self should not be made by itself.
-    new = undefined
+    new = error "Self cannot be made"
 
     self ! msg = do
         _ <- runCallbackModuleIO self msg
