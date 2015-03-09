@@ -28,7 +28,7 @@ data GReply
 
 newtype Group = Group { unGroup :: Object GMessage GReply }
 
-instance ObjectLike Group where
+instance ObjectLike IO Group where
     type Message Group = GMessage
     type Reply Group = GReply
 

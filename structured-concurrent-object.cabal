@@ -21,6 +21,8 @@ library
   default-extensions:  ScopedTypeVariables
                      , TypeFamilies
                      , RecordWildCards
+                     , MultiParamTypeClasses
+                     , FlexibleInstances
   -- other-extensions:    
   build-depends:       base >=4.7 && <4.8
                      , stm
@@ -38,6 +40,8 @@ test-suite work
                      , GADTs
                      , Rank2Types
                      , RecordWildCards
+                     , MultiParamTypeClasses
+                     , FlexibleInstances
   hs-source-dirs:      tests, src
   build-depends:       base             >=4.7  && <4.8
                      , stm
@@ -50,6 +54,8 @@ test-suite group
   default-extensions:  ScopedTypeVariables
                      , TypeFamilies
                      , RecordWildCards
+                     , MultiParamTypeClasses
+                     , FlexibleInstances
   hs-source-dirs:      tests, src
   build-depends:       base             >=4.7  && <4.8
                      , stm

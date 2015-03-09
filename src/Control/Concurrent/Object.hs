@@ -34,11 +34,11 @@ import Control.Concurrent.STM
 --          This参照的なことはどうする？
 --              Selfをactionに渡した
 
-data Class msg reply state
+data Class m msg reply state
     = Class
-    { classInitializer :: IO state
-    , classFinalizer :: state -> IO ()
-    , classCallbackModule :: CallbackModule msg reply state
+    { classInitializer :: m state
+    , classFinalizer :: state -> m ()
+    , classCallbackModule :: CallbackModule m msg reply state
     }
 
 data Object msg reply
@@ -47,28 +47,27 @@ data Object msg reply
     , objChan :: TChan (msg, Maybe (MVar reply))
     }
 
-data Self msg reply state
+data Self m msg reply state
     = Self
     { selfThreadId :: ThreadId
     , selfChan :: TChan (msg, Maybe (MVar reply)) -- ^ Necesarry? Message sent in action would be evaluated in time, not via Channel.
-    , selfModule :: CallbackModule msg reply state -- ^ Not TVar. CallbackModule must not be changed during action.
+    , selfModule :: CallbackModule m msg reply state -- ^ Not TVar. CallbackModule must not be changed during action.
     , selfState :: TVar state
     }
 
-newtype CallbackModule msg reply state
-    = CallbackModule { unCM :: Self msg reply state -> msg -> IO (reply, Self msg reply state) }
+newtype CallbackModule m msg reply state
+    = CallbackModule { unCM :: Self m msg reply state -> msg -> m (reply, Self m msg reply state) }
 
-runCallbackModule
-    :: Self msg reply state
+runCallbackModuleIO
+    :: Self IO msg reply state
     -> msg
-    -> IO (reply, Self msg reply state)
-runCallbackModule self msg = (unCM $ selfModule self) self msg
+    -> IO (reply, Self IO msg reply state)
+runCallbackModuleIO self msg = (unCM $ selfModule self) self msg
 
--- | Make Object from Class.
-new
-    :: Class msg reply state
+newObject
+    :: Class IO msg reply state
     -> IO (Object msg reply)
-new Class{..} = do
+newObject Class{..} = do
     ch <- newTChanIO
     tid <- forkIO $ bracket classInitializer classFinalizer $ \ (st :: state) -> do
         let
@@ -76,7 +75,7 @@ new Class{..} = do
                 (msg, mmv)
                     <- atomically $ readTChan ch
                 (reply, self')
-                    <- runCallbackModule self msg
+                    <- runCallbackModuleIO self msg
                 case mmv of
                     Just mv -> putMVar mv reply
                     Nothing -> return ()
@@ -89,22 +88,29 @@ new Class{..} = do
     return $ Object tid ch
 
 
-class ObjectLike obj where
+class ObjectLike m obj where
     type Message obj :: *
     type Reply obj :: *
+    type Klass obj :: * -> *
+
+    -- | Make Object.
+    new :: Klass obj state -> m obj
 
     -- | Kill Object.
-    kill :: obj -> IO ()
+    kill :: obj -> m ()
 
     -- Asynchronous sending
-    (!) :: obj -> Message obj -> IO ()
+    (!) :: obj -> Message obj -> m ()
 
     -- Synchronous sending
-    (!?) :: obj -> Message obj -> IO (IO (Reply obj))
+    (!?) :: obj -> Message obj -> m (m (Reply obj))
 
-instance ObjectLike (Object msg reply) where
+instance ObjectLike IO (Object msg reply) where
     type Message (Object msg reply) = msg
     type Reply (Object msg reply) = reply
+    type Klass (Object msg reply) = Class IO msg reply
+
+    new = newObject
 
     obj ! msg = atomically $ writeTChan (objChan obj) (msg, Nothing)
 
@@ -116,16 +122,19 @@ instance ObjectLike (Object msg reply) where
 
     kill obj = killThread $ objThreadId obj
 
-instance ObjectLike (Self msg reply state) where
-    type Message (Self msg reply state) = msg
-    type Reply (Self msg reply state) = reply
+instance ObjectLike IO (Self IO msg reply state) where
+    type Message (Self IO msg reply state) = msg
+    type Reply (Self IO msg reply state) = reply
+
+    -- | Self should not be made by itself.
+    new = undefined
 
     self ! msg = do
-        _ <- runCallbackModule self msg
+        _ <- runCallbackModuleIO self msg
         return ()
 
     self !? msg = do
-        (reply, _self') <- runCallbackModule self msg
+        (reply, _self') <- runCallbackModuleIO self msg
         mv <- newMVar reply
         return $ readMVar mv
 
