@@ -16,12 +16,14 @@ type GState = Map.Map MemberId MemberName
 data GMessage
     = AddMember MemberId MemberName
     | RemoveMember MemberId
+    | GetGroupId
     | GetMember MemberId
     | GetAllMembers
 
 data GReply
     = AddMemberR Bool
     | RemoveMemberR Bool
+    | GetGroupIdR GroupId
     | GetMemberR (Maybe MemberName)
     | GetAllMembersR [MemberId]
     deriving (Show)
@@ -41,21 +43,24 @@ instance ObjectLike IO Group where
 
 newGroup :: GroupId -> IO Group
 newGroup gid = new Class
-    { classInitializer = return Map.empty
+    { classInitializer = return (gid, Map.empty)
     , classFinalizer = (\_st -> putStrLn "Cleanup")
     , classCallbackModule = CallbackModule $ \self@Self{..} msg -> case msg of
             AddMember mid name -> do
-                atomically $ modifyTVar' selfState (Map.insert mid name)
+                atomically $ modifyTVar' selfState (\ (gid, mems) -> (gid, Map.insert mid name mems))
                 return (AddMemberR True, self)
             RemoveMember mid -> do
-                atomically $ modifyTVar' selfState (Map.delete mid)
+                atomically $ modifyTVar' selfState (\ (gid, mems) -> (gid, Map.delete mid mems))
                 return (RemoveMemberR True, self)
+            GetGroupId -> do
+                (gid, _mems) <- atomically $ readTVar selfState
+                return (GetGroupIdR gid, self)
             GetMember mid -> do
-                mems <- atomically $ readTVar selfState
+                (_gid, mems) <- atomically $ readTVar selfState
                 return (GetMemberR (Map.lookup mid mems), self)
             GetAllMembers -> do
                 mids :: [MemberId]
-                    <- (map fst . Map.toList) <$> (atomically $ readTVar selfState)
+                    <- (map fst . Map.toList . snd) <$> (atomically $ readTVar selfState)
                 return (GetAllMembersR mids, self)
     }
 
@@ -72,10 +77,9 @@ main = do
     gr ! RemoveMember 2
     gr ! RemoveMember 3
 
+    (join $ gr !? GetGroupId) >>= print
     (join $ gr !? GetMember 1) >>= print
     (join $ gr !? GetMember 2) >>= print
+    (join $ gr !? GetAllMembers) >>= print
 
-    mids <- join $ gr !? GetAllMembers
-
-    print mids
     kill gr
