@@ -7,11 +7,19 @@ import Control.Concurrent.Object
 import Control.Concurrent.STM
 import qualified Data.Map as Map
 
+--------------------------------------------------------------------------------
+-- | Group
+
+newtype Group = Group { unGroup :: Object GMessage GReply }
 
 type GroupId = Int
 type MemberId = Int
 type MemberName = String
-type GState = Map.Map MemberId MemberName
+
+data GState = GState
+    { groupId :: GroupId
+    , groupMembers :: Map.Map MemberId MemberName
+    }
 
 data GMessage
     = AddMember MemberId MemberName
@@ -28,8 +36,6 @@ data GReply
     | GetAllMembersR [MemberId]
     deriving (Show)
 
-newtype Group = Group { unGroup :: Object GMessage GReply }
-
 instance ObjectLike IO Group where
     type OMessage Group = GMessage
     type OReply Group = GReply
@@ -40,27 +46,30 @@ instance ObjectLike IO Group where
     (Group obj) !? msg = obj !? msg
     kill (Group obj) = kill obj
 
+--------------------------------------------------------------------------------
 
 newGroup :: GroupId -> IO Group
 newGroup gid = new Class
-    { classInitializer = return (gid, Map.empty)
+    { classInitializer = return $ GState gid Map.empty
     , classFinalizer = (\_st -> putStrLn "Cleanup")
     , classCallbackModule = CallbackModule $ \self@Self{..} msg -> case msg of
             AddMember mid name -> do
-                atomically $ modifyTVar' selfState (\ (gid, mems) -> (gid, Map.insert mid name mems))
+                atomically $ modifyTVar' selfState
+                        (\ gst -> gst { groupMembers = Map.insert mid name (groupMembers gst) })
                 return (AddMemberR True, self)
             RemoveMember mid -> do
-                atomically $ modifyTVar' selfState (\ (gid, mems) -> (gid, Map.delete mid mems))
+                atomically $ modifyTVar' selfState
+                        (\ gst -> gst { groupMembers = Map.delete mid (groupMembers gst) })
                 return (RemoveMemberR True, self)
             GetGroupId -> do
-                (gid, _mems) <- atomically $ readTVar selfState
-                return (GetGroupIdR gid, self)
+                gst <- atomically $ readTVar selfState
+                return (GetGroupIdR $ groupId gst, self)
             GetMember mid -> do
-                (_gid, mems) <- atomically $ readTVar selfState
-                return (GetMemberR (Map.lookup mid mems), self)
+                gst <- atomically $ readTVar selfState
+                return (GetMemberR $ Map.lookup mid (groupMembers gst), self)
             GetAllMembers -> do
                 mids :: [MemberId]
-                    <- (map fst . Map.toList . snd) <$> (atomically $ readTVar selfState)
+                    <- (map fst . Map.toList . groupMembers) <$> (atomically $ readTVar selfState)
                 return (GetAllMembersR mids, self)
     }
 
