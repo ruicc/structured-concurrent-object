@@ -30,11 +30,13 @@ library
   ghc-options:         -Wall
   default-language:    Haskell2010
 
-test-suite object-io
+test-suite work
   type:                exitcode-stdio-1.0
   main-is:             object.hs
   default-extensions:  ScopedTypeVariables
                      , TypeFamilies
+                     , GADTs
+                     , Rank2Types
                      , RecordWildCards
   hs-source-dirs:      tests, src
   build-depends:       base             >=4.7  && <4.8
