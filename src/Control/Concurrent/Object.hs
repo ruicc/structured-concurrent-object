@@ -1,8 +1,11 @@
-module Control.Concurrent.Object where
+module Control.Concurrent.Object
+    ( Class(..), Object, Self(..), CallbackModule(..)
+    , new, (!), (!?), kill
+    ) where
 
-import Prelude hiding (init)
+import Prelude hiding (init, mod)
 --import Control.Concurrent.Structured
-import Control.Monad
+--import Control.Monad
 import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -14,6 +17,7 @@ import Control.Concurrent.STM
 --          DONE
 --      エラーハンドリング
 --          bracketはあるけど..
+--          親に通知が必要か(Async?)
 --      Group消滅時の処理
 --          DONE
 --   Options:
@@ -24,74 +28,103 @@ import Control.Concurrent.STM
 --      メッセージハンドラの動的差し替え
 --          ロジックのレコード化
 --      状態のタイムアウト (openは30000msecのみ)
---          非同期イベント用フォークする？ This参照？
+--          非同期イベント用フォークする？ This参照的なことはどうする？
+--              Objectをactionに渡した
 
-data Class msg reply = Class
-    { onInit
-    , onDeleted
-    , onEvent
+data Class msg reply state
+    = Class
+    { classInitializer :: IO state
+    , classFinalizer :: state -> IO ()
+    , classCallbackModule :: CallbackModule msg reply state
     }
 
-
-data Object msg reply = Object
+data Object msg reply
+    = Object
     { objThreadId :: ThreadId
     , objChan :: TChan (msg, Maybe (MVar reply))
     }
 
+data Self msg reply state
+    = Self
+    { selfThreadId :: ThreadId
+    , selfChan :: TChan (msg, Maybe (MVar reply)) -- ^ Necesarry? Message sent in action would be evaluated in time, not via Channel.
+    , selfModule :: CallbackModule msg reply state -- ^ Not TVar. CallbackModule must not be changed during action.
+    , selfState :: TVar state
+    }
 
-new :: IO state -> (state -> IO b) -> (Object msg reply -> msg -> state -> IO (reply, state)) -> IO (Object msg reply)
-new init final action = do
+newtype CallbackModule msg reply state
+    = CallbackModule { unCM :: Self msg reply state -> msg -> IO (reply, Self msg reply state) }
+
+runCallbackModule
+    :: Self msg reply state
+    -> msg
+    -> IO (reply, Self msg reply state)
+runCallbackModule self msg = (unCM $ selfModule self) self msg
+
+-- | Make Object from Class.
+new
+    :: Class msg reply state
+    -> IO (Object msg reply)
+new Class{..} = do
     ch <- newTChanIO
-    -- これだとイベントの差し替えができない
-    tid <- forkIO $ bracket init final $ \ (s :: state) -> do
+    tid <- forkIO $ bracket classInitializer classFinalizer $ \ (st :: state) -> do
         let
-            loop obj state = do
-                (msg, mmv) <- atomically $ readTChan ch
-                (reply, state')
-                    <- action
-                            obj -- アクション内で自身にメッセージ投げたい時に必要
-                            msg
-                            state
+            loop self = do
+                (msg, mmv)
+                    <- atomically $ readTChan ch
+                -- TODO: fork & dispatch??
+                (reply, self')
+                    <- runCallbackModule self msg
                 case mmv of
                     Just mv -> putMVar mv reply
                     Nothing -> return ()
-                loop obj state'
+                loop $ self'
 
         tid <- myThreadId
-        loop (Object tid ch) s
+        tst <- newTVarIO st
+        loop $ Self tid ch classCallbackModule tst
+
     return $ Object tid ch
 
--- Asynchronous send
-(!) :: Object msg reply -> msg -> IO ()
-obj ! msg = atomically $ writeTChan (objChan obj) (msg, Nothing)
 
--- Synchronous send/receive
-(!?) :: Object msg reply -> msg -> IO (IO reply)
-obj !? msg = do
-    mv <- newEmptyMVar
-    atomically $ writeTChan (objChan obj) (msg, Just mv)
-    return $ takeMVar mv
+class ObjectLike obj where
+    type Message obj :: *
+    type Reply obj :: *
 
-kill :: Object msg reply -> IO ()
-kill obj = killThread $ objThreadId obj
+    -- | Kill Object.
+    kill :: obj -> IO ()
 
+    -- Asynchronous sending
+    (!) :: obj -> Message obj -> IO ()
 
---------------------------------------------------------------------------------
+    -- Synchronous sending
+    (!?) :: obj -> Message obj -> IO (IO (Reply obj))
 
-data Msg1 = Inc | Get
+instance ObjectLike (Object msg reply) where
+    type Message (Object msg reply) = msg
+    type Reply (Object msg reply) = reply
 
-test :: IO ()
-test = do
-    obj :: Object Msg1 Int
-        <- new
-                (return 42)
-                (\_ -> putStrLn "cleanup")
-                (\msg st -> case msg of
-                    Inc -> putStrLn "Inc" >> return (st + 1, st + 1)
-                    Get -> return (st, st))
-    print =<< join (obj !? Get)
-    obj ! Inc
-    obj ! Inc
-    obj ! Inc
-    print =<< join (obj !? Get)
-    kill obj
+    obj ! msg = atomically $ writeTChan (objChan obj) (msg, Nothing)
+
+    obj !? msg = do
+        mv <- newEmptyMVar
+        atomically $ writeTChan (objChan obj) (msg, Just mv)
+        -- TODO: timeout
+        return $ readMVar mv
+
+    kill obj = killThread $ objThreadId obj
+
+instance ObjectLike (Self msg reply state) where
+    type Message (Self msg reply state) = msg
+    type Reply (Self msg reply state) = reply
+
+    self ! msg = do
+        _ <- runCallbackModule self msg
+        return ()
+
+    self !? msg = do
+        (reply, _self') <- runCallbackModule self msg
+        mv <- newMVar reply
+        return $ readMVar mv
+
+    kill self = killThread $ selfThreadId self
