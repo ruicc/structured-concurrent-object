@@ -10,42 +10,12 @@ import Control.Concurrent.STM
 import Control.Concurrent.Object.Internal
 
 
-runCallbackModuleIO
-    :: Self msg reply state
-    -> msg
-    -> IO (reply, Self msg reply state)
-runCallbackModuleIO self msg = (unCM $ selfModule self) self msg
-
-newObjectIO
-    :: Class msg reply state
-    -> IO (Object msg reply)
-newObjectIO Class{..} = do
-    ch <- newTChanIO
-    tid <- forkIO $ bracket classInitializer classFinalizer $ \ (st :: state) -> do
-        let
-            loop self = do
-                (msg, mmv)
-                    <- atomically $ readTChan ch
-                (reply, self')
-                    <- runCallbackModuleIO self msg
-                case mmv of
-                    Just mv -> putMVar mv reply
-                    Nothing -> return ()
-                loop $ self'
-
-        tid <- myThreadId
-        tst <- newTVarIO st
-        loop $ Self tid ch classCallbackModule tst
-
-    return $ Object tid ch
-
-
 instance ObjectLike IO (Object msg reply) where
     type OMessage (Object msg reply) = msg
     type OReply (Object msg reply) = reply
     type OClass (Object msg reply) = Class msg reply
 
-    new = newObjectIO
+    new = newObject
 
     obj ! msg = atomically $ writeTChan (objChan obj) (msg, Nothing)
 
@@ -67,11 +37,11 @@ instance ObjectLike IO (Self msg reply state) where
     new = error "Self cannot be made"
 
     self ! msg = do
-        _ <- runCallbackModuleIO self msg
+        _ <- runCallbackModule self msg
         return ()
 
     self !? msg = do
-        (reply, _self') <- runCallbackModuleIO self msg
+        (reply, _self') <- runCallbackModule self msg
         mv <- newMVar reply
         return $ readMVar mv
 

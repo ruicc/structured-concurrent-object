@@ -17,7 +17,7 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Control.Concurrent.Object
---                     , Control.Concurrent.Structured.Object
+                     , Control.Concurrent.Structured.Object
   other-modules:       Control.Concurrent.Object.Internal
   default-extensions:  ScopedTypeVariables
                      , TypeFamilies
@@ -26,6 +26,7 @@ library
                      , FlexibleInstances
   -- other-extensions:    
   build-depends:       base >=4.7 && <4.8
+                     , transformers
                      , stm
                      , structured-concurrent
 --                     , objective

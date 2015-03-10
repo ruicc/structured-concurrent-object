@@ -1,6 +1,8 @@
 module Control.Concurrent.Object.Internal
     ( Class(..), Object(..), Self(..), CallbackModule(..)
     , ObjectLike(..)
+    , runCallbackModule
+    , newObject
     ) where
 
 import Control.Exception
@@ -47,3 +49,31 @@ class ObjectLike m obj where
 
     -- Synchronous sending a message.
     (!?) :: obj -> OMessage obj -> m (m (OReply obj))
+
+
+runCallbackModule
+    :: Self msg reply state
+    -> msg
+    -> IO (reply, Self msg reply state)
+runCallbackModule self msg = (unCM $ selfModule self) self msg
+
+newObject :: Class msg reply state -> IO (Object msg reply)
+newObject Class{..} = do
+    ch <- newTChanIO
+    tid <- forkIO $ bracket classInitializer classFinalizer $ \ (st :: state) -> do
+        let
+            loop self = do
+                (msg, mmv)
+                    <- atomically $ readTChan ch
+                (reply, self')
+                    <- runCallbackModule self msg
+                case mmv of
+                    Just mv -> putMVar mv reply
+                    Nothing -> return ()
+                loop $ self'
+
+        tid <- myThreadId
+        tst <- newTVarIO st
+        loop $ Self tid ch classCallbackModule tst
+
+    return $ Object tid ch
