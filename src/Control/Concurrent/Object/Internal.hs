@@ -7,11 +7,11 @@ import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.STM
 
-data Class m msg reply state
+data Class msg reply state
     = Class
-    { classInitializer :: m state
-    , classFinalizer :: state -> m ()
-    , classCallbackModule :: CallbackModule m msg reply state
+    { classInitializer :: IO state
+    , classFinalizer :: state -> IO ()
+    , classCallbackModule :: CallbackModule msg reply state
     }
 
 data Object msg reply
@@ -20,16 +20,16 @@ data Object msg reply
     , objChan :: TChan (msg, Maybe (MVar reply))
     }
 
-data Self m msg reply state
+data Self msg reply state
     = Self
     { selfThreadId :: ThreadId
     , selfChan :: TChan (msg, Maybe (MVar reply)) -- ^ Necesarry? Message sent in action would be evaluated in time, not via Channel.
-    , selfModule :: CallbackModule m msg reply state -- ^ Not TVar. CallbackModule must not be changed during action.
+    , selfModule :: CallbackModule msg reply state -- ^ Not TVar. CallbackModule must not be changed during action.
     , selfState :: TVar state
     }
 
-newtype CallbackModule m msg reply state
-    = CallbackModule { unCM :: Self m msg reply state -> msg -> m (reply, Self m msg reply state) }
+newtype CallbackModule msg reply state
+    = CallbackModule { unCM :: Self msg reply state -> msg -> IO (reply, Self msg reply state) }
 
 class ObjectLike m obj where
     type OMessage obj :: *
@@ -42,8 +42,8 @@ class ObjectLike m obj where
     -- | Kill Object.
     kill :: obj -> m ()
 
-    -- Asynchronous sending
+    -- Asynchronous sending a message.
     (!) :: obj -> OMessage obj -> m ()
 
-    -- Synchronous sending
+    -- Synchronous sending a message.
     (!?) :: obj -> OMessage obj -> m (m (OReply obj))

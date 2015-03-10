@@ -11,13 +11,13 @@ import Control.Concurrent.Object.Internal
 
 
 runCallbackModuleIO
-    :: Self IO msg reply state
+    :: Self msg reply state
     -> msg
-    -> IO (reply, Self IO msg reply state)
+    -> IO (reply, Self msg reply state)
 runCallbackModuleIO self msg = (unCM $ selfModule self) self msg
 
 newObjectIO
-    :: Class IO msg reply state
+    :: Class msg reply state
     -> IO (Object msg reply)
 newObjectIO Class{..} = do
     ch <- newTChanIO
@@ -43,7 +43,7 @@ newObjectIO Class{..} = do
 instance ObjectLike IO (Object msg reply) where
     type OMessage (Object msg reply) = msg
     type OReply (Object msg reply) = reply
-    type OClass (Object msg reply) = Class IO msg reply
+    type OClass (Object msg reply) = Class msg reply
 
     new = newObjectIO
 
@@ -58,10 +58,10 @@ instance ObjectLike IO (Object msg reply) where
     kill obj = killThread $ objThreadId obj
 
 
-instance ObjectLike IO (Self IO msg reply state) where
-    type OMessage (Self IO msg reply state) = msg
-    type OReply (Self IO msg reply state) = reply
-    type OClass (Self IO msg reply state) = Class IO msg reply
+instance ObjectLike IO (Self msg reply state) where
+    type OMessage (Self msg reply state) = msg
+    type OReply (Self msg reply state) = reply
+    type OClass (Self msg reply state) = Class msg reply
 
     -- | Self should not be made by itself.
     new = error "Self cannot be made"

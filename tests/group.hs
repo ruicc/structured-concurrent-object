@@ -39,7 +39,7 @@ data GReply
 instance ObjectLike IO Group where
     type OMessage Group = GMessage
     type OReply Group = GReply
-    type OClass Group = Class IO GMessage GReply
+    type OClass Group = Class GMessage GReply
 
     new cl = Group <$> new cl
     (Group obj) ! msg = obj ! msg
