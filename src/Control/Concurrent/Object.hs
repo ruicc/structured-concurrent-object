@@ -7,53 +7,8 @@ import Prelude hiding (init, mod)
 import Control.Exception
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.Concurrent.Object.Internal
 
--- | TODO:
---      Group生成
---          DONE
---      AddMemberに対して処理
---          DONE
---      エラーハンドリング
---          bracketはあるけど..
---          親に通知が必要か(Async?)
---      Group消滅時の処理
---          DONE
---   Options:
---      有限状態マシン gen_fsm
---          DONE(?)
---      メッセージハンドラのadd/remove (gen_event)
---          とりあえずClassで。
---      メッセージハンドラの動的差し替え
---          ロジックのレコード化
---      状態のタイムアウト (openは30000msecのみ)
---          非同期イベント用フォークする？
---              しない、内部イベントは外部イベントとは別途処理
---          This参照的なことはどうする？
---              Selfをactionに渡した
-
-data Class m msg reply state
-    = Class
-    { classInitializer :: m state
-    , classFinalizer :: state -> m ()
-    , classCallbackModule :: CallbackModule m msg reply state
-    }
-
-data Object msg reply
-    = Object
-    { objThreadId :: ThreadId
-    , objChan :: TChan (msg, Maybe (MVar reply))
-    }
-
-data Self m msg reply state
-    = Self
-    { selfThreadId :: ThreadId
-    , selfChan :: TChan (msg, Maybe (MVar reply)) -- ^ Necesarry? Message sent in action would be evaluated in time, not via Channel.
-    , selfModule :: CallbackModule m msg reply state -- ^ Not TVar. CallbackModule must not be changed during action.
-    , selfState :: TVar state
-    }
-
-newtype CallbackModule m msg reply state
-    = CallbackModule { unCM :: Self m msg reply state -> msg -> m (reply, Self m msg reply state) }
 
 runCallbackModuleIO
     :: Self IO msg reply state
@@ -61,10 +16,10 @@ runCallbackModuleIO
     -> IO (reply, Self IO msg reply state)
 runCallbackModuleIO self msg = (unCM $ selfModule self) self msg
 
-newObject
+newObjectIO
     :: Class IO msg reply state
     -> IO (Object msg reply)
-newObject Class{..} = do
+newObjectIO Class{..} = do
     ch <- newTChanIO
     tid <- forkIO $ bracket classInitializer classFinalizer $ \ (st :: state) -> do
         let
@@ -85,29 +40,12 @@ newObject Class{..} = do
     return $ Object tid ch
 
 
-class ObjectLike m obj where
-    type OMessage obj :: *
-    type OReply obj :: *
-    type OClass obj :: * -> *
-
-    -- | Make Object.
-    new :: OClass obj state -> m obj
-
-    -- | Kill Object.
-    kill :: obj -> m ()
-
-    -- Asynchronous sending
-    (!) :: obj -> OMessage obj -> m ()
-
-    -- Synchronous sending
-    (!?) :: obj -> OMessage obj -> m (m (OReply obj))
-
 instance ObjectLike IO (Object msg reply) where
     type OMessage (Object msg reply) = msg
     type OReply (Object msg reply) = reply
     type OClass (Object msg reply) = Class IO msg reply
 
-    new = newObject
+    new = newObjectIO
 
     obj ! msg = atomically $ writeTChan (objChan obj) (msg, Nothing)
 
@@ -118,6 +56,7 @@ instance ObjectLike IO (Object msg reply) where
         return $ readMVar mv
 
     kill obj = killThread $ objThreadId obj
+
 
 instance ObjectLike IO (Self IO msg reply state) where
     type OMessage (Self IO msg reply state) = msg
